@@ -1,3 +1,4 @@
 @openzeppelin/=lib/openzeppelin-contracts/
 @uniswap/v3-core/=lib/v3-core/
 @uniswap/lib/=lib/solidity-lib/
+base64-sol/=lib/base64/
