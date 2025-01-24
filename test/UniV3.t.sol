@@ -20,26 +20,26 @@ contract UniV3Test is Test {
     NonfungibleTokenPositionDescriptor public tokenDescriptor;
     NonfungiblePositionManager public positionManager;
 
-    function setupCreate_1() public {
+    function setupCreate() public {
         token1 = new TestToken(1000000 ether);
         token2 = new TestToken(1000000 ether);
         weth = new WETH9();
         factory = new UniswapV3Factory();
-        // router = new SwapRouter(address(factory), address(weth));
+        router = new SwapRouter(address(factory), address(weth));
+        tokenDescriptor = new NonfungibleTokenPositionDescriptor(
+            address(weth),
+            0x0000000000000000000000000000000000000000000000000000000057455448
+        );
+        positionManager = new NonfungiblePositionManager(
+            address(factory),
+            address(weth),
+            address(tokenDescriptor)
+        );
     }
 
     function setUp() public {
         // CREATE
-        setupCreate_1();
-        // tokenDescriptor = new NonfungibleTokenPositionDescriptor(
-        //     address(weth),
-        //     0x0000000000000000000000000000000000000000000000000000000057455448
-        // );
-        // positionManager = new NonfungiblePositionManager(
-        //     address(factory),
-        //     address(weth),
-        //     address(tokenDescriptor)
-        // );
+        setupCreate();
 
         // SETUP
         weth.deposit{value: 10 ether}();
