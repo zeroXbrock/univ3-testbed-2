@@ -13,3 +13,6 @@
 [submodule "lib/testToken"]
 	path = lib/testToken
 	url = https://github.com/zeroxbrock/testToken
+[submodule "lib/solidity-lib"]
+	path = lib/solidity-lib
+	url = https://github.com/Uniswap/solidity-lib
