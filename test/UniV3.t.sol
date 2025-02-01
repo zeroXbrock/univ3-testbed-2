@@ -11,18 +11,21 @@ import {SwapRouter} from "lib/v3-periphery/contracts/SwapRouter.sol";
 import {NonfungibleTokenPositionDescriptor} from "lib/v3-periphery/contracts/NonfungibleTokenPositionDescriptor.sol";
 import {NonfungiblePositionManager, INonfungiblePositionManager} from "lib/v3-periphery/contracts/NonfungiblePositionManager.sol";
 import {IUniswapV3Pool} from "lib/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
+import {UniswapV3Pool} from "lib/v3-core/contracts/UniswapV3Pool.sol";
 import {FullMath} from "lib/v3-core/contracts/libraries/FullMath.sol";
 import {TickMath} from "lib/v3-core/contracts/libraries/TickMath.sol";
 import "lib/v3-periphery/contracts/libraries/LiquidityAmounts.sol";
+// import {NonfungiblePositionManagerDeployer} from "../src/NonfungiblePositionManagerDeployer.sol";
+import {PoolAddress} from "lib/v3-periphery/contracts/libraries/PoolAddress.sol";
 
 contract UniV3Test is Test {
     TestToken public token1;
     TestToken public token2;
     WETH9 public weth;
     UniswapV3Factory public factory;
-    SwapRouter public router;
+    // SwapRouter public router;
     NonfungibleTokenPositionDescriptor public tokenDescriptor;
-    NonfungiblePositionManager public positionManager;
+    INonfungiblePositionManager public positionManager;
     IUniswapV3Pool public pool_weth_token1;
     IUniswapV3Pool public pool_weth_token2;
     uint256 swapPrice;
@@ -32,7 +35,7 @@ contract UniV3Test is Test {
         token2 = new TestToken(1000000 ether);
         weth = new WETH9();
         factory = new UniswapV3Factory();
-        router = new SwapRouter(address(factory), address(weth));
+        // router = new SwapRouter(address(factory), address(weth));
         tokenDescriptor = new NonfungibleTokenPositionDescriptor(
             address(weth),
             0x0000000000000000000000000000000000000000000000000000000057455448
@@ -48,25 +51,12 @@ contract UniV3Test is Test {
         // deploy contracts
         setupCreate();
 
-        weth.deposit{value: 2000 ether}();
+        weth.deposit{value: 200 ether}();
 
-        // approvals (may not be necessary)
-        weth.approve(
-            address(positionManager),
-            0x00ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
-        );
-        token1.approve(
-            address(positionManager),
-            0x00ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
-        );
-        token2.approve(
-            address(positionManager),
-            0x00ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
-        );
-
+        // address pool1 =
         address pool1 = factory.createPool(
-            address(weth),
             address(token1),
+            address(weth),
             3000
         );
         pool_weth_token1 = IUniswapV3Pool(pool1);
@@ -79,29 +69,46 @@ contract UniV3Test is Test {
         pool_weth_token2 = IUniswapV3Pool(pool2);
 
         // initialize pools
-        swapPrice = 1;
-        console.log("price\t\t\t", swapPrice);
+        swapPrice = 1; // 1:1 ratio
         uint160 sqrtPriceX96 = calculateSqrtPriceX96(swapPrice);
-        IUniswapV3Pool(pool_weth_token1).initialize(sqrtPriceX96);
-        IUniswapV3Pool(pool_weth_token2).initialize(sqrtPriceX96);
+        pool_weth_token1.initialize(sqrtPriceX96);
+        pool_weth_token2.initialize(sqrtPriceX96);
     }
 
     function test_setup() public {
         assertEq(token1.balanceOf(address(this)), 1000000 ether);
         assertEq(token2.balanceOf(address(this)), 1000000 ether);
-        assertEq(weth.balanceOf(address(this)), 2000 ether);
-        console.log("weth", address(weth));
+        assertEq(weth.balanceOf(address(this)), 200 ether);
+    }
 
-        positionManager.baseURI();
+    function test_getSpecialHash() public {
+        bytes32 POOL_INIT_CODE_HASH = keccak256(
+            abi.encodePacked(type(UniswapV3Pool).creationCode)
+        );
+        console.log("POOL_INIT_CODE_HASH:");
+        console.logBytes32(POOL_INIT_CODE_HASH);
+        console.log(
+            "if this test fails, you need to compile with 100 optimizer runs"
+        );
+        assertEq(
+            POOL_INIT_CODE_HASH,
+            0xab6b3a47840aafde372c5e857b5807a568062115efda807cef7db6938fea3481
+        );
     }
 
     function test_mint() public {
         // mint positions
-        uint256 wethAmount = 10 ether;
-        uint256 tokenAmount = 10 ether;
+        uint256 wethAmount = 1 ether;
+        uint256 tokenAmount = 1 ether;
+
+        address dst = address(0x420);
+        weth.transfer(dst, wethAmount * 2);
+        token1.transfer(dst, tokenAmount * 2);
+
+        vm.startPrank(dst);
 
         int24 tickSpacing = pool_weth_token1.tickSpacing();
-        (, int24 tick, , , , , ) = pool_weth_token1.slot0();
+        (uint160 sqrtPriceX96, int24 tick, , , , , ) = pool_weth_token1.slot0();
 
         (address payable _token0, address payable _token1) = address(weth) <
             address(token1)
@@ -111,7 +118,7 @@ contract UniV3Test is Test {
             ? (wethAmount, tokenAmount)
             : (tokenAmount, wethAmount);
 
-        int24 tickScalar = 4;
+        int24 tickScalar = 40;
         int24 tickLower = tick - (tickSpacing * tickScalar);
         int24 tickUpper = tick + (tickSpacing * tickScalar);
 
@@ -120,14 +127,14 @@ contract UniV3Test is Test {
                 token0: _token0,
                 token1: _token1,
                 fee: 3000,
-                tickLower: -887220,
-                tickUpper: 887220,
+                tickLower: tickLower,
+                tickUpper: tickUpper,
                 amount0Desired: amount0,
                 amount1Desired: amount1,
                 amount0Min: 0,
                 amount1Min: 0,
-                recipient: address(this),
-                deadline: block.timestamp + 50000
+                recipient: dst,
+                deadline: vm.getBlockTimestamp() + 60
             });
         positionManager.mint(params);
     }
@@ -223,40 +230,5 @@ contract UniV3Test is Test {
         uint24 tickSpacing
     ) internal pure returns (int24 alignedTick) {
         alignedTick = int24((tick / int24(tickSpacing)) * int24(tickSpacing));
-    }
-
-    /// @dev Example function to calculate ticks and liquidity for 1:1 price range
-    /// @param amount0Desired Amount of token0 (e.g., 1000 * 10^18)
-    /// @param amount1Desired Amount of token1 (e.g., 1000 * 10^18)
-    /// @return tickLower The lower tick
-    /// @return tickUpper The upper tick
-    /// @return liquidity The required liquidity
-    function calculateLiquidityForOneToOneRate(
-        uint256 amount0Desired,
-        uint256 amount1Desired
-    )
-        internal
-        pure
-        returns (int24 tickLower, int24 tickUpper, uint128 liquidity)
-    {
-        // Current price is 1:1, sqrt(1) = 1 in Q96 format
-        uint160 sqrtPriceX96 = TickMath.getSqrtRatioAtTick(0); // Tick 0 corresponds to 1:1 price
-
-        // Define the range: sqrtPriceLower and sqrtPriceUpper
-        uint160 sqrtPriceLowerX96 = TickMath.getSqrtRatioAtTick(-120); // 0.8
-        uint160 sqrtPriceUpperX96 = TickMath.getSqrtRatioAtTick(120); // 1.2
-
-        // Convert ticks to ensure alignment with tick spacing
-        tickLower = alignToTickSpacing(-120, 60);
-        tickUpper = alignToTickSpacing(120, 60);
-
-        // Calculate liquidity using the LiquidityAmounts library
-        liquidity = LiquidityAmounts.getLiquidityForAmounts(
-            sqrtPriceX96,
-            sqrtPriceLowerX96,
-            sqrtPriceUpperX96,
-            amount0Desired,
-            amount1Desired
-        );
     }
 }
