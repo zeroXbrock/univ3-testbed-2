@@ -8,6 +8,7 @@ import {WETH9} from "lib/testToken/src/WETH9.sol";
 import {NonfungiblePositionManager} from "lib/v3-periphery/contracts/NonfungiblePositionManager.sol";
 import {UniswapV3Factory} from "lib/v3-core/contracts/UniswapV3Factory.sol";
 import {SwapRouter} from "lib/v3-periphery/contracts/SwapRouter.sol";
+import {ISwapRouter} from "lib/v3-periphery/contracts/interfaces/ISwapRouter.sol";
 import {NonfungibleTokenPositionDescriptor} from "lib/v3-periphery/contracts/NonfungibleTokenPositionDescriptor.sol";
 import {NonfungiblePositionManager, INonfungiblePositionManager} from "lib/v3-periphery/contracts/NonfungiblePositionManager.sol";
 import {IUniswapV3Pool} from "lib/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
@@ -23,7 +24,7 @@ contract UniV3Test is Test {
     TestToken public token2;
     WETH9 public weth;
     UniswapV3Factory public factory;
-    // SwapRouter public router;
+    SwapRouter public router;
     NonfungibleTokenPositionDescriptor public tokenDescriptor;
     INonfungiblePositionManager public positionManager;
     IUniswapV3Pool public pool_weth_token1;
@@ -35,7 +36,7 @@ contract UniV3Test is Test {
         token2 = new TestToken(1000000 ether);
         weth = new WETH9();
         factory = new UniswapV3Factory();
-        // router = new SwapRouter(address(factory), address(weth));
+        router = new SwapRouter(address(factory), address(weth));
         tokenDescriptor = new NonfungibleTokenPositionDescriptor(
             address(weth),
             0x0000000000000000000000000000000000000000000000000000000057455448
@@ -73,12 +74,17 @@ contract UniV3Test is Test {
         uint160 sqrtPriceX96 = calculateSqrtPriceX96(swapPrice);
         pool_weth_token1.initialize(sqrtPriceX96);
         pool_weth_token2.initialize(sqrtPriceX96);
+
+        // mint LP tokens
+        mint(address(weth), address(token1));
+        mint(address(weth), address(token2));
     }
 
     function test_setup() public {
-        assertEq(token1.balanceOf(address(this)), 1000000 ether);
-        assertEq(token2.balanceOf(address(this)), 1000000 ether);
-        assertEq(weth.balanceOf(address(this)), 200 ether);
+        // check balances post-mint
+        assertEq(token1.balanceOf(address(this)), 1000000 ether - 1 ether);
+        assertEq(token2.balanceOf(address(this)), 1000000 ether - 1 ether);
+        assertEq(weth.balanceOf(address(this)), 200 ether - 2 ether);
     }
 
     function test_getSpecialHash() public {
@@ -88,7 +94,7 @@ contract UniV3Test is Test {
         console.log("POOL_INIT_CODE_HASH:");
         console.logBytes32(POOL_INIT_CODE_HASH);
         console.log(
-            "if this test fails, you need to compile with 100 optimizer runs"
+            "if this test fails, you need to compile with '--optimizer-runs 100'"
         );
         assertEq(
             POOL_INIT_CODE_HASH,
@@ -97,28 +103,27 @@ contract UniV3Test is Test {
     }
 
     function test_mint() public {
+        mint(address(weth), address(token1));
+        // TODO: make assertions
+    }
+
+    function mint(address tokenA, address tokenB) public {
         // mint positions
-        uint256 wethAmount = 1 ether;
-        uint256 tokenAmount = 1 ether;
-
-        address dst = address(0x420);
-        weth.transfer(dst, wethAmount * 2);
-        token1.transfer(dst, tokenAmount * 2);
-
-        vm.startPrank(dst);
+        uint256 amountA = 1 ether;
+        uint256 amountB = 1 ether;
 
         int24 tickSpacing = pool_weth_token1.tickSpacing();
         (uint160 sqrtPriceX96, int24 tick, , , , , ) = pool_weth_token1.slot0();
 
-        (address payable _token0, address payable _token1) = address(weth) <
-            address(token1)
-            ? (payable(address(weth)), payable(address(token1)))
-            : (payable(address(token1)), payable(address(weth)));
-        (uint256 amount0, uint256 amount1) = address(weth) < address(token1)
-            ? (wethAmount, tokenAmount)
-            : (tokenAmount, wethAmount);
+        (address payable _token0, address payable _token1) = address(tokenA) <
+            address(tokenB)
+            ? (payable(address(tokenA)), payable(address(tokenB)))
+            : (payable(address(tokenB)), payable(address(tokenA)));
+        (uint256 amount0, uint256 amount1) = address(tokenA) < address(tokenB)
+            ? (amountA, amountB)
+            : (amountB, amountA);
 
-        int24 tickScalar = 40;
+        int24 tickScalar = 2;
         int24 tickLower = tick - (tickSpacing * tickScalar);
         int24 tickUpper = tick + (tickSpacing * tickScalar);
 
@@ -133,10 +138,37 @@ contract UniV3Test is Test {
                 amount1Desired: amount1,
                 amount0Min: 0,
                 amount1Min: 0,
-                recipient: dst,
+                recipient: address(this),
                 deadline: vm.getBlockTimestamp() + 60
             });
         positionManager.mint(params);
+    }
+
+    function test_swap() public {
+        // swap 1 WETH for 1 token1
+        uint256 amountIn = 1 ether / 10;
+        uint256 amountOutMinimum = 1;
+        uint160 sqrtPriceLimitX96 = 0;
+
+        uint256 tokenBalance = token1.balanceOf(address(this));
+
+        // swap 1 WETH for 1 token1
+        router.exactInputSingle(
+            ISwapRouter.ExactInputSingleParams({
+                tokenIn: address(weth),
+                tokenOut: address(token1),
+                fee: 3000,
+                recipient: address(this),
+                deadline: vm.getBlockTimestamp() + 60,
+                amountIn: amountIn,
+                amountOutMinimum: amountOutMinimum,
+                sqrtPriceLimitX96: sqrtPriceLimitX96
+            })
+        );
+
+        uint256 balanceDelta = token1.balanceOf(address(this)) - tokenBalance;
+
+        assertGt(balanceDelta, amountIn - ((amountIn * 3) / 100));
     }
 
     // utils ########################################
